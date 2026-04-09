@@ -1,7 +1,6 @@
 # WikiRAG MVP — Project Context for Claude Code
 
-> Place this file at the root of your workspace. Claude Code will automatically use it as
-> shared project context across all sessions.
+> Place this file at the root of your workspace. Claude Code will automatically use it as shared project context across all sessions.
 >
 > Source documents: `Claude_WikiRAG_MVP_Design.pdf` · `Claude_Implementation_Roadmap.pdf`
 
