@@ -1,0 +1,23 @@
+# Qdrant configuration
+# https://qdrant.tech/documentation/guides/configuration/
+
+storage:
+  # Storage path is set via Docker volume mount at /qdrant/storage
+  on_disk_payload: true   # keep vector payloads on disk to reduce RAM usage
+
+service:
+  host: 0.0.0.0
+  http_port: 6333
+  grpc_port: 6334
+
+# HNSW index defaults — applied at collection creation time in worker/embed.py
+# m: number of bi-directional links per node (higher = better recall, more RAM)
+# ef_construct: size of the candidate list during index build (higher = better recall, slower build)
+collection:
+  vectors:
+    size: 768
+    distance: Cosine
+    hnsw_config:
+      m: 16
+      ef_construct: 100
+      full_scan_threshold: 10000
