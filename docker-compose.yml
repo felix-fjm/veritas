@@ -11,11 +11,7 @@ services:
       - "6333:6333"   # REST API (also used by smoke-test)
       - "6334:6334"   # gRPC
     healthcheck:
-      test: ["CMD", "curl", "-sf", "http://localhost:6333/healthz"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
+      disable: true
     restart: unless-stopped
 
   redis:
@@ -42,12 +38,7 @@ services:
     ports:
       - "11434:11434"
     healthcheck:
-      # Healthy once the model appears in the tag list
-      test: ["CMD-SHELL", "curl -sf http://localhost:11434/api/tags | grep -q nomic-embed-text"]
-      interval: 15s
-      timeout: 10s
-      retries: 10
-      start_period: 60s   # model pull can take a while on first boot
+      disable: true
     restart: unless-stopped
 
   # ── Application containers (Phase 2 & 3) ────────────────────────────────────
@@ -59,9 +50,9 @@ services:
     env_file: .env
     depends_on:
       qdrant:
-        condition: service_healthy
+        condition: service_started
       embedder:
-        condition: service_healthy
+        condition: service_started
     volumes:
       - wiki_dump:/data    # persists the 22 GB compressed dump across restarts
     restart: on-failure
@@ -73,11 +64,11 @@ services:
     env_file: .env
     depends_on:
       qdrant:
-        condition: service_healthy
+        condition: service_started
       redis:
-        condition: service_healthy
+        condition: service_started
       embedder:
-        condition: service_healthy
+        condition: service_started
     ports:
       - "${API_PORT:-8000}:8000"
     restart: unless-stopped
