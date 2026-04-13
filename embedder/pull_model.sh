@@ -10,8 +10,8 @@ until curl -sf http://localhost:11434/api/tags > /dev/null 2>&1; do
   sleep 1
 done
 
-echo "Pulling nomic-embed-text-v1.5..."
-ollama pull nomic-embed-text-v1.5
+echo "Pulling nomic-embed-text:v1.5..."
+ollama pull nomic-embed-text:v1.5
 
 echo "Model ready. Keeping server in foreground."
 wait $SERVER_PID

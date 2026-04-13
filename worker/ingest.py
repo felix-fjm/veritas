@@ -21,7 +21,7 @@ import sys
 from qdrant_client import QdrantClient
 from tqdm import tqdm
 
-from download import download_dump, stream_articles
+from download import download_dump, stream_articles, stream_articles_from_url
 from embed import get_or_create_collection, upsert_chunks
 from parse import filter_articles, process_article
 
@@ -77,7 +77,11 @@ def main() -> None:
         logger.info("Mode:     FULL RUN (top %.0f%%)", top_fraction * 100)
 
     # ── Step 1: Download dump ─────────────────────────────────────────────────
-    if os.path.exists(dump_path):
+    # In --limit mode we stream directly from the URL to avoid downloading the
+    # full ~22 GB file for a smoke-test.
+    if args.limit:
+        logger.info("Step 1/5  Skipped (limit mode — streaming directly from URL).")
+    elif os.path.exists(dump_path):
         logger.info("Dump already present at %s — skipping download.", dump_path)
     else:
         logger.info("Step 1/5  Downloading Cirrus dump...")
@@ -89,8 +93,8 @@ def main() -> None:
     logger.info("Step 2/5  Loading articles from dump...")
 
     if args.limit:
-        # Fast path: stream directly, no popularity pre-scan needed
-        raw_articles = list(stream_articles(dump_path, limit=args.limit))
+        # Fast path: stream directly from URL, no disk download needed
+        raw_articles = list(stream_articles_from_url(dump_url, limit=args.limit))
         logger.info("Loaded %d articles (limit mode).", len(raw_articles))
 
         # In limit mode: keep all articles that pass the stub filter; rank by

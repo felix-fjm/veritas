@@ -35,6 +35,8 @@ services:
       - ollama_models:/root/.ollama       # persist downloaded model weights
       - ./embedder/pull_model.sh:/pull_model.sh:ro
     entrypoint: ["/bin/sh", "/pull_model.sh"]
+    environment:
+      - OLLAMA_NUM_CTX=8192
     ports:
       - "11434:11434"
     healthcheck:
@@ -58,8 +60,8 @@ services:
     restart: on-failure
 
   api:
-    build: 
-      context: ./worker
+    build:
+      context: ./api
     platform: linux/amd64
     env_file: .env
     depends_on:

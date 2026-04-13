@@ -106,6 +106,28 @@ def extract_sections(article: dict) -> list[tuple[str, str]]:
 
 # ── Chunking ──────────────────────────────────────────────────────────────────
 
+def _split_by_words(
+    text: str,
+    max_tokens: int,
+    overlap_tokens: int,
+) -> list[str]:
+    """
+    Fallback splitter for blocks that have no paragraph boundaries but still
+    exceed max_tokens.  Slices by word count and carries an overlap window into
+    each successive sub-chunk.
+    """
+    words = text.split()
+    result: list[str] = []
+    start = 0
+    while start < len(words):
+        end = min(start + max_tokens, len(words))
+        result.append(" ".join(words[start:end]))
+        if end >= len(words):
+            break
+        start = end - overlap_tokens  # carry overlap into next sub-chunk
+    return result
+
+
 def chunk_section(
     text: str,
     max_tokens: int = 600,
@@ -119,6 +141,12 @@ def chunk_section(
 
     When splitting, overlap is achieved by carrying the last N tokens of the
     previous chunk into the start of the next chunk.
+
+    Individual paragraphs that exceed max_tokens are expanded via word-level
+    splitting before the paragraph-accumulation loop runs.  Without this, a
+    single large paragraph (no internal double-newline) would bypass the
+    max_tokens guard because the `and current_paras` condition is False when
+    the accumulator is empty, letting the whole paragraph through as-is.
     """
     n = count_tokens(text)
 
@@ -128,8 +156,15 @@ def chunk_section(
     if n <= max_tokens:
         return [text]
 
-    # Split at paragraph boundaries
-    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    # Split at paragraph boundaries, then expand any paragraph that is itself
+    # larger than max_tokens using word-level splitting.
+    raw_paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    paragraphs: list[str] = []
+    for para in raw_paragraphs:
+        if count_tokens(para) > max_tokens:
+            paragraphs.extend(_split_by_words(para, max_tokens, overlap_tokens))
+        else:
+            paragraphs.append(para)
 
     chunks: list[str] = []
     current_paras: list[str] = []

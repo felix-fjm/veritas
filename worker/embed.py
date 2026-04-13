@@ -46,25 +46,54 @@ def make_point_id(title: str, section: str, chunk_index: int) -> str:
 
 # ── Embedding ─────────────────────────────────────────────────────────────────
 
+_MAX_WORDS = 2000  # safety margin: nomic context is 8192 BPE tokens; BPE ≈ 2× words, so 2000 words ≈ 4000 BPE tokens
+
+
+def _truncate(text: str, title: str | None = None) -> str:
+    """Truncate text to _MAX_WORDS whitespace-separated words if needed."""
+    words = text.split()
+    if len(words) <= _MAX_WORDS:
+        return text
+    label = f"'{title}'" if title else "(no title)"
+    logger.warning(
+        "Truncating chunk %s from %d words to %d words before embedding.",
+        label, len(words), _MAX_WORDS,
+    )
+    return " ".join(words[:_MAX_WORDS])
+
+
 def embed_texts(
     texts: list[str],
     embedder_url: str,
     model: str,
+    titles: list[str] | None = None,
 ) -> np.ndarray:
     """
-    Embed a batch of texts via Ollama /api/embed.
+    Embed a list of texts via Ollama POST /api/embed, one request per text.
+
+    /api/embed accepts {"model": str, "input": str} with a single string
+    and returns {"embeddings": [[...768 floats...]]}.
+
+    texts are truncated to _MAX_WORDS words before sending to avoid
+    exceeding the model's 8192-token context window.
 
     Returns float32 array of shape (len(texts), 768), L2-normalised.
     Raises httpx.HTTPStatusError on API errors.
     """
-    response = httpx.post(
-        f"{embedder_url}/api/embed",
-        json={"model": model, "input": texts},
-        timeout=120.0,
-    )
-    response.raise_for_status()
+    embeddings = []
+    for i, text in enumerate(texts):
+        title = titles[i] if titles else None
+        payload = {"model": model, "input": _truncate(text, title)}
+        if i == 0:
+            logger.debug("embed_texts payload (first text): %s", payload)
+        response = httpx.post(
+            f"{embedder_url}/api/embed",
+            json=payload,
+            timeout=120.0,
+        )
+        response.raise_for_status()
+        embeddings.append(response.json()["embeddings"][0])
 
-    embeddings = response.json()["embeddings"]  # list[list[float]]
     vectors = np.array(embeddings, dtype=np.float32)
 
     # L2-normalise each vector (Ollama may already do this, but it's idempotent)
@@ -103,8 +132,9 @@ def upsert_chunks(
     ):
         batch = chunks[batch_start : batch_start + batch_size]
         texts = [c["text"] for c in batch]
+        titles = [c["title"] for c in batch]
 
-        vectors = embed_texts(texts, embedder_url, model)
+        vectors = embed_texts(texts, embedder_url, model, titles=titles)
 
         points = [
             PointStruct(

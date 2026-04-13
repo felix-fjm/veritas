@@ -369,3 +369,12 @@ than creating duplicates. Critical for the weekly update worker.
 | LLM call dominates latency (1–3s) | UI feels slow | Redis answer cache absorbs repeated queries; stream LLM response tokens to UI |
 | Stale answers after weekly update | User sees outdated information | Flush Redis answer cache immediately after Qdrant update completes |
 | Context window overflow on small local models | LLM truncates context silently | Dynamic context budget: detect model, cap chunks (3 chunks for 8k-context models) |
+
+---
+
+## Development Environment
+
+- Docker runs in **WSL2 Ubuntu** on Windows — all `docker compose` commands must be run inside WSL
+- Open a WSL shell: `wsl -d Ubuntu`
+- Project path inside WSL: `/mnt/c/Users/fjmul/veritas_app`
+- Typical smoke-test cycle: `docker compose build --no-cache worker && docker compose run worker python ingest.py --limit 100`
