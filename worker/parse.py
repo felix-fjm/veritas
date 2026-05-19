@@ -62,44 +62,43 @@ def extract_sections(article: dict) -> list[tuple[str, str]]:
     """
     Return a list of (section_name, raw_text) tuples.
 
-    Strategy:
-    - Split article text into paragraph blocks (double-newline boundaries).
-    - A block whose first line exactly matches a known heading title starts
-      a new section; subsequent blocks belong to that section.
-    - The first run of blocks before any heading becomes the "Introduction".
+    PATH 1 — source_text present (raw wikitext):
+      - "Introduction" from opening_text (exact, reliable)
+      - Real named sections parsed from wikitext heading markers (== ... ==)
+      - Text before the first heading is discarded; opening_text covers it.
+
+    PATH 2 — source_text absent (typical Cirrus record):
+      - "Introduction" from opening_text (exact, reliable)
+      - "Body" from the flat Cirrus text field (entire article body as one section)
+      - heading[] is NOT used for segmentation (offsets are unknown); it is
+        stored separately as available_headings in process_article().
     """
-    text: str = article.get("text") or ""
-    headings: list[str] = article.get("heading") or []
     opening_text: str = article.get("opening_text") or ""
-
-    heading_set = {h.strip() for h in headings}
-
-    blocks = [b.strip() for b in re.split(r"\n\n+", text) if b.strip()]
+    source_text: str = article.get("source_text") or ""
 
     sections: list[tuple[str, str]] = []
-    current_name = "Introduction"
-    current_blocks: list[str] = []
 
-    for block in blocks:
-        first_line = block.split("\n")[0].strip()
+    intro = opening_text.strip()
+    if intro:
+        sections.append(("Introduction", intro))
 
-        if first_line in heading_set:
-            # Save accumulated blocks under the current section name
-            if current_blocks:
-                sections.append((current_name, "\n\n".join(current_blocks)))
-            current_name = first_line
-            # The rest of the block after the heading line is section content
-            rest = "\n".join(block.split("\n")[1:]).strip()
-            current_blocks = [rest] if rest else []
-        else:
-            current_blocks.append(block)
+    if source_text:
+        # PATH 1: parse real section boundaries from wikitext heading markers
+        heading_pattern = re.compile(r"^(={2,})\s*(.+?)\s*\1\s*$", re.MULTILINE)
+        matches = list(heading_pattern.finditer(source_text))
 
-    if current_blocks:
-        sections.append((current_name, "\n\n".join(current_blocks)))
-
-    # Fallback: if nothing was parsed but opening_text exists, use it
-    if not sections and opening_text:
-        sections.append(("Introduction", opening_text))
+        for i, match in enumerate(matches):
+            heading_name = match.group(2).strip()
+            start = match.end()
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(source_text)
+            section_text = source_text[start:end].strip()
+            if section_text:
+                sections.append((heading_name, section_text))
+    else:
+        # PATH 2: flat Cirrus text field → single honest "Body" section
+        body = (article.get("text") or "").strip()
+        if body:
+            sections.append(("Body", body))
 
     return sections
 
@@ -208,12 +207,21 @@ def process_article(article: dict, pageview_rank: int) -> list[dict]:
 
     Returns a list of chunk dicts with all required metadata fields:
       text, title, section, url, last_modified, pageview_rank, chunk_index
+    For PATH 2 articles (no source_text), also includes available_headings.
     """
     title: str = article.get("title") or ""
     url = f"https://en.wikipedia.org/wiki/{title.replace(' ', '_')}"
     # Cirrus timestamp is ISO-8601; store date portion only
     raw_ts: str = article.get("timestamp") or ""
     last_modified = raw_ts[:10] if raw_ts else ""
+
+    # PATH 2 only: preserve heading[] as payload context (not used for segmentation)
+    available_headings: list[str] | None = None
+    if not article.get("source_text"):
+        raw_headings = article.get("heading") or []
+        clean_h = [h.strip() for h in raw_headings if h.strip()]
+        if clean_h:
+            available_headings = clean_h
 
     sections = extract_sections(article)
 
@@ -240,7 +248,7 @@ def process_article(article: dict, pageview_rank: int) -> list[dict]:
     for section_name, section_text in merged:
         chunk_texts = chunk_section(section_text)
         for chunk_text in chunk_texts:
-            result.append({
+            chunk: dict = {
                 "text": chunk_text,
                 "title": title,
                 "section": section_name,
@@ -248,7 +256,10 @@ def process_article(article: dict, pageview_rank: int) -> list[dict]:
                 "last_modified": last_modified,
                 "pageview_rank": pageview_rank,
                 "chunk_index": chunk_index,
-            })
+            }
+            if available_headings is not None:
+                chunk["available_headings"] = available_headings
+            result.append(chunk)
             chunk_index += 1
 
     return result
