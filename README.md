@@ -1,8 +1,8 @@
 # Veritas — Wikipedia-Grounded RAG System
 
-> Ask any question. Get a sourced, factual answer drawn directly from English Wikipedia — with clickable citations for every claim.
+> Ask any question. Get a sourced, factual answer drawn directly from English Wikipedia - with clickable citations for every claim.
 
-Veritas is a fully self-hosted, Dockerised RAG (Retrieval-Augmented Generation) system that turns the English Wikipedia into a continuously updated knowledge base. It grounds any LLM in verified, sourced context — eliminating hallucination on factual questions. You bring your own API key; Veritas handles ingestion, embedding, retrieval, and prompt assembly.
+Veritas is a fully self-hosted, Dockerised RAG (Retrieval-Augmented Generation) system that turns the English Wikipedia into a continuously updated knowledge base. It grounds any LLM in verified, sourced context - eliminating hallucination on factual questions. You bring your own API key; Veritas handles ingestion, embedding, retrieval, and prompt assembly.
 
 ---
 
@@ -30,7 +30,7 @@ Your Question
  Answer + Sources     ← grounded, cited, verifiable
 ```
 
-On a **cache hit** (Redis), steps 2–6 are skipped entirely — response in ~2ms.
+On a **cache hit** (Redis), steps 2–6 are skipped entirely - response in ~2ms.
 
 ---
 
@@ -76,7 +76,7 @@ Five Docker containers. Two custom services (`api` + `worker`) share three offic
 ```
 
 **Why separate `worker` and `api`?**
-The worker is GPU-bound and runs for hours during ingestion. The API is I/O-bound and must stay responsive 24/7. Separating them means a re-index job never blocks user queries. Both share the same `embedder` container — critical because query vectors and chunk vectors must live in the same embedding space.
+The worker is GPU-bound and runs for hours during ingestion. The API is I/O-bound and must stay responsive 24/7. Separating them means a re-index job never blocks user queries. Both share the same `embedder` container - critical because query vectors and chunk vectors must live in the same embedding space.
 
 ---
 
@@ -204,7 +204,7 @@ docker compose run --rm -e PYTHONUNBUFFERED=1 worker python ingest.py --limit 10
 docker compose run --rm -e PYTHONUNBUFFERED=1 worker python ingest.py
 ```
 
-> The API is usable while the worker is still indexing — partial results are returned from whatever is indexed so far.
+> The API is usable while the worker is still indexing - partial results are returned from whatever is indexed so far.
 
 ### 5. Start the API
 
@@ -237,7 +237,7 @@ curl -X POST http://localhost:8000/query \
 **Example response:**
 ```json
 {
-  "answer": "The French Revolution was caused by a combination of financial crisis, social inequality, and Enlightenment ideals [1 — Causes]. The French state was effectively bankrupt by 1788 following costly wars including support for the American Revolution [2 — Financial crisis].",
+  "answer": "The French Revolution was caused by a combination of financial crisis, social inequality, and Enlightenment ideals [1 - Causes]. The French state was effectively bankrupt by 1788 following costly wars including support for the American Revolution [2 - Financial crisis].",
   "sources": [
     {
       "title": "French Revolution",
@@ -318,7 +318,7 @@ The worker processes each Wikipedia article through 8 steps:
 | 7 | Embed | `nomic-embed-text-v1.5` · batch 64 · mean-pool + L2-norm → `float32[768]` |
 | 8 | Upsert | `PointStruct(id=uuid5(title+section+idx), vector, payload)` → Qdrant |
 
-**Deterministic chunk IDs** (`uuid5(title + section + chunk_index)`) make upserts idempotent — re-running ingestion on a changed article overwrites vectors in place without creating duplicates.
+**Deterministic chunk IDs** (`uuid5(title + section + chunk_index)`) make upserts idempotent - re-running ingestion on a changed article overwrites vectors in place without creating duplicates.
 
 ---
 
@@ -364,7 +364,7 @@ Then rebuild with `DOCKER_BUILDKIT=0 docker compose build --no-cache worker`.
 The worker container ran with a stale image. Always rebuild before ingesting: `docker compose build --no-cache worker`.
 
 **Retrieval returns unrelated articles**
-Your index is too small — with fewer than ~100 articles, cosine similarity has little to work with and returns the least-dissimilar chunks regardless of relevance. Run `--limit 1000` or higher for meaningful retrieval.
+Your index is too small - with fewer than ~100 articles, cosine similarity has little to work with and returns the least-dissimilar chunks regardless of relevance. Run `--limit 1000` or higher for meaningful retrieval.
 
 **`cached: true` returning stale answers**
 Redis answer TTL is 6 hours. To flush immediately:
@@ -376,7 +376,7 @@ docker compose exec redis redis-cli FLUSHALL
 
 ## Weekly Update Worker
 
-*(Phase 4 — coming soon)*
+*(Phase 4 - coming soon)*
 
 The update worker re-downloads the Cirrus dump every Monday at 03:00 and applies only the delta to Qdrant — typically 50–150k changed articles per week (~5–15% of the index). Full re-index: 4–6 hours. Weekly update: 30–60 minutes.
 
@@ -398,7 +398,7 @@ The update worker re-downloads the Cirrus dump every Monday at 03:00 and applies
 
 **HNSW search:** Qdrant's Hierarchical Navigable Small World index navigates ~300–500 candidate vectors from millions without brute-force comparison — returning top-k results in ~5–20ms with ~99% recall vs exact search.
 
-**RAG grounding:** The LLM never accesses Qdrant directly. The API retrieves top-5 chunks, injects them as context with the instruction `"answer ONLY using the context below"`, then calls the LLM. The model synthesises an answer from provided paragraphs — it cannot invent facts that contradict the context.
+**RAG grounding:** The LLM never accesses Qdrant directly. The API retrieves top-5 chunks, injects them as context with the instruction `"answer ONLY using the context below"`, then calls the LLM. The model synthesises an answer from provided paragraphs - it cannot invent facts that contradict the context.
 
 ---
 
