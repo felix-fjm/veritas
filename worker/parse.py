@@ -26,7 +26,8 @@ def count_tokens(text: str) -> int:
 
 def clean_text(text: str) -> str:
     """
-    Strip citation markers, HTML entities, table artefacts; normalise whitespace.
+    Strip wikitext markup, HTML, citation markers, and table artefacts;
+    normalise whitespace.  Safe to call on both body text and section names.
     """
     if not text:
         return ""
@@ -34,8 +35,35 @@ def clean_text(text: str) -> str:
     # Strip [N] citation / footnote markers
     text = re.sub(r"\[\d+\]", "", text)
 
-    # Decode HTML entities (&amp; &lt; &nbsp; etc.)
+    # Remove <ref>...</ref> footnote blocks entirely (multiline)
+    text = re.sub(r"<ref[^>]*>.*?</ref>", "", text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r"<ref[^/]*/?>", "", text, flags=re.IGNORECASE)
+
+    # Strip all remaining HTML tags (keep text content between tags)
+    text = re.sub(r"<[^>]+>", "", text)
+
+    # Decode HTML entities (&amp; &lt; &nbsp; etc.) — after tag removal
     text = html.unescape(text)
+
+    # Strip wikitext templates {{...}}, handling nesting by iterating inward-out
+    prev = None
+    while prev != text:
+        prev = text
+        text = re.sub(r"\{\{[^{}]*\}\}", "", text)
+
+    # Strip File / Image links entirely [[File:...]] [[Image:...]]
+    text = re.sub(r"\[\[(?:File|Image):[^\]]*\]\]", "", text, flags=re.IGNORECASE)
+
+    # Strip internal links: [[target|label]] → label,  [[target]] → target
+    text = re.sub(r"\[\[(?:[^|\]]*\|)?([^\]]+)\]\]", r"\1", text)
+
+    # Strip external links: [url label] → label,  [url] → empty
+    text = re.sub(r"\[https?://\S+\s+([^\]]+)\]", r"\1", text)
+    text = re.sub(r"\[https?://\S+\]", "", text)
+
+    # Strip bold/italic markers (''' before '' to avoid leaving stray apostrophes)
+    text = re.sub(r"'{3}", "", text)
+    text = re.sub(r"'{2}", "", text)
 
     # Remove wiki table markup remnants ({| ... |})
     text = re.sub(r"\{\|.*?\|\}", "", text, flags=re.DOTALL)
@@ -43,9 +71,9 @@ def clean_text(text: str) -> str:
     # Remove table cell / header lines (lines starting with | or !)
     text = re.sub(r"(?m)^\s*[|!].*$", "", text)
 
-    # Remove bare wiki markup characters left over (= signs, * bullets)
-    text = re.sub(r"(?m)^={2,}.*={2,}$", "", text)   # == Section == headers
-    text = re.sub(r"(?m)^\*+\s*$", "", text)           # stray bullet lines
+    # Remove wikitext section heading lines == ... ==
+    text = re.sub(r"(?m)^={2,}.*={2,}$", "", text)
+    text = re.sub(r"(?m)^\*+\s*$", "", text)  # stray bullet lines
 
     # Collapse excessive blank lines
     text = re.sub(r"\n{3,}", "\n\n", text)
@@ -88,7 +116,7 @@ def extract_sections(article: dict) -> list[tuple[str, str]]:
         matches = list(heading_pattern.finditer(source_text))
 
         for i, match in enumerate(matches):
-            heading_name = match.group(2).strip()
+            heading_name = clean_text(match.group(2).strip())
             start = match.end()
             end = matches[i + 1].start() if i + 1 < len(matches) else len(source_text)
             section_text = source_text[start:end].strip()
