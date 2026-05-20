@@ -1,8 +1,8 @@
-# Veritas — Wikipedia-Grounded RAG System
+# RAGpedia — Wikipedia-Grounded RAG System
 
 > Ask any question. Get a sourced, factual answer drawn directly from English Wikipedia - with clickable citations for every claim.
 
-Veritas is a fully self-hosted, Dockerised RAG (Retrieval-Augmented Generation) system that turns the English Wikipedia into a continuously updated knowledge base. It grounds any LLM in verified, sourced context - eliminating hallucination on factual questions. You bring your own API key; Veritas handles ingestion, embedding, retrieval, and prompt assembly.
+RAGpedia is a fully self-hosted, Dockerised RAG (Retrieval-Augmented Generation) system that turns the English Wikipedia into a continuously updated knowledge base. It grounds any LLM in verified, sourced context - eliminating hallucination on factual questions. You bring your own API key; RAGpedia handles ingestion, embedding, retrieval, and prompt assembly.
 
 ---
 
@@ -83,7 +83,7 @@ The worker is GPU-bound and runs for hours during ingestion. The API is I/O-boun
 ## Project Structure
 
 ```
-veritas_app/
+ragpedia_app/
 ├── docker-compose.yml          ← wires all 5 containers
 ├── .env                        ← API keys & config (never commit)
 ├── .gitignore
@@ -137,8 +137,8 @@ veritas_app/
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/felix-fjm/veritas.git
-cd veritas_app
+git clone https://github.com/felix-fjm/RAGpedia.git
+cd ragpedia_app
 ```
 
 ### 2. Configure environment variables
