@@ -83,39 +83,38 @@ The worker is GPU-bound and runs for hours during ingestion. The API is I/O-boun
 ## Project Structure
 
 ```
-ragpedia_app/
-├── docker-compose.yml          ← wires all 5 containers
-├── .env                        ← API keys & config (never commit)
-├── .gitignore
-├── CLAUDE.md                   ← project context for Claude Code
-│
-├── api/                        ← FastAPI query endpoint + UI server
-│   ├── Dockerfile
-│   ├── main.py                 ← GET /health · POST /query · GET /
-│   ├── embedder.py             ← embed query via nomic container
-│   ├── cache.py                ← Redis SHA-256 cache logic
-│   ├── llm.py                  ← OpenAI / Anthropic / Ollama connector
-│   ├── prompt.py               ← top-5 chunk selection + prompt assembly
-│   ├── requirements.txt
-│   └── static/
-│       └── index.js            ← single-file UI
-│
-├── worker/                     ← ingestion pipeline + weekly cron
-│   ├── Dockerfile
-│   ├── ingest.py               ← full pipeline orchestrator
-│   ├── download.py             ← streaming Cirrus JSON downloader
-│   ├── parse.py                ← filter · parse · clean · chunk
-│   ├── embed.py                ← batch embed + upsert to Qdrant
-│   ├── update.py               ← weekly diff + upsert/delete
-│   ├── scheduler.py            ← cron entry point (Monday 03:00)
-│   └── requirements.txt
-│
-├── qdrant/
-│   └── config.yaml             ← optional HNSW params
-├── redis/
-│   └── redis.conf              ← optional maxmemory / eviction policy
-└── embedder/
-    └── pull_model.sh           ← pulls nomic-embed-text-v1.5 on start
+docker-compose.yml          ← wires all 5 containers
+.env                        ← API keys & config (never commit)
+.gitignore
+CLAUDE.md                   ← project context for Claude Code
+
+api/                        ← FastAPI query endpoint + UI server
+ ├── Dockerfile
+ ├── main.py                 ← GET /health · POST /query · GET /
+ ├── embedder.py             ← embed query via nomic container
+ ├── cache.py                ← Redis SHA-256 cache logic
+ ├── llm.py                  ← OpenAI / Anthropic / Ollama connector
+ ├── prompt.py               ← top-5 chunk selection + prompt assembly
+ ├── requirements.txt
+ └── static/
+      └── index.js            ← single-file UI
+
+worker/                     ← ingestion pipeline + weekly cron
+ ├── Dockerfile
+ ├── ingest.py               ← full pipeline orchestrator
+ ├── download.py             ← streaming Cirrus JSON downloader
+ ├── parse.py                ← filter · parse · clean · chunk
+ ├── embed.py                ← batch embed + upsert to Qdrant
+ ├── update.py               ← weekly diff + upsert/delete
+ ├── scheduler.py            ← cron entry point (Monday 03:00)
+ └── requirements.txt
+
+qdrant/
+ └── config.yaml             ← optional HNSW params
+redis/
+ └── redis.conf              ← optional maxmemory / eviction policy
+embedder/
+ └── pull_model.sh           ← pulls nomic-embed-text-v1.5 on start
 ```
 
 ---
@@ -138,7 +137,7 @@ ragpedia_app/
 
 ```bash
 git clone https://github.com/felix-fjm/RAGpedia.git
-cd ragpedia_app
+cd RAGpedia
 ```
 
 ### 2. Configure environment variables
