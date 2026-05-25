@@ -1,12 +1,19 @@
 """
 Full ingestion pipeline entry point.
 
-Steps:
+Steps (full run):
   1. Download Cirrus JSON dump to local disk (skipped if file already exists)
-  2. First streaming pass: collect all articles into memory for popularity ranking
-  3. Filter: top 15% by pageview rank, discard stubs < 300 tokens
-  4. Process each article: extract sections → clean → chunk → attach metadata
-  5. Batch embed chunks (batch=64) and upsert PointStructs to Qdrant
+  2. Pass 1 — stream dump once, collect only (popularity_score, title) pairs
+  3. Compute popularity threshold; build title→rank mapping
+  4. Connect to Qdrant; create collection if absent
+  5. Pass 2 — stream dump again; for each article in rank_map: parse → chunk → embed → upsert
+
+Steps (--limit smoke-test):
+  1. Skipped (stream directly from URL)
+  2. Stream N articles into memory, sort by score, assign ranks
+  3. Skipped (all N articles kept)
+  4. Connect to Qdrant
+  5. Process article list
 
 Usage:
   python ingest.py              # full run (~1M articles)
@@ -23,7 +30,7 @@ from tqdm import tqdm
 
 from download import download_dump, stream_articles, stream_articles_from_url
 from embed import get_or_create_collection, upsert_chunks
-from parse import filter_articles, process_article
+from parse import compute_popularity_threshold_from_scores, count_tokens, process_article
 
 logging.basicConfig(
     level=logging.INFO,
@@ -76,89 +83,143 @@ def main() -> None:
     else:
         logger.info("Mode:     FULL RUN (top %.0f%%)", top_fraction * 100)
 
-    # ── Step 1: Download dump ─────────────────────────────────────────────────
-    # In --limit mode we stream directly from the URL to avoid downloading the
-    # full ~22 GB file for a smoke-test.
+    total_chunks = 0
+    total_upserted = 0
+    articles_processed = 0
+
     if args.limit:
+        # ── Limit mode: fast smoke-test, stream N articles directly from URL ──
         logger.info("Step 1/5  Skipped (limit mode — streaming directly from URL).")
-    elif os.path.exists(dump_path):
-        logger.info("Dump already present at %s — skipping download.", dump_path)
-    else:
-        logger.info("Step 1/5  Downloading Cirrus dump...")
-        download_dump(dump_url, dump_path)
-
-    # ── Step 2: Load articles for ranking ────────────────────────────────────
-    # For --limit runs we skip popularity ranking to keep smoke-tests fast:
-    # just assign rank=0 to all articles and apply only the stub filter.
-    logger.info("Step 2/5  Loading articles from dump...")
-
-    if args.limit:
-        # Fast path: stream directly from URL, no disk download needed
+        logger.info("Step 2/5  Streaming %d articles from URL...", args.limit)
         raw_articles = list(stream_articles_from_url(dump_url, limit=args.limit))
         logger.info("Loaded %d articles (limit mode).", len(raw_articles))
 
-        # In limit mode: keep all articles that pass the stub filter; rank by
-        # popularity_score position (higher score = lower rank number).
+        # Rank within this sample by popularity_score; keep all (no top-% cut)
         raw_articles.sort(key=lambda a: a.get("popularity_score") or 0.0, reverse=True)
         article_rank_pairs = [
             (article, rank + 1)
             for rank, article in enumerate(raw_articles)
         ]
+
+        logger.info(
+            "Step 3/5  Skipped (limit mode — all %d articles ranked by score).",
+            len(article_rank_pairs),
+        )
+
+        logger.info("Step 4/5  Connecting to Qdrant and ensuring collection exists...")
+        client = QdrantClient(host=qdrant_host, port=qdrant_port)
+        get_or_create_collection(client, collection_name)
+
+        logger.info("Step 5/5  Processing, embedding, and upserting chunks...")
+        for article, rank in tqdm(article_rank_pairs, desc="Articles", unit="article"):
+            chunks = process_article(article, pageview_rank=rank)
+            if not chunks:
+                continue
+            total_chunks += len(chunks)
+            upserted = upsert_chunks(
+                chunks=chunks,
+                client=client,
+                collection_name=collection_name,
+                embedder_url=embedder_url,
+                model=embed_model,
+                batch_size=batch_size,
+            )
+            total_upserted += upserted
+            articles_processed += 1
+
     else:
-        # Full run: load all articles (lightweight objects) for popularity ranking.
-        # ~6.7M articles × ~200 bytes avg ≈ ~1.3 GB RAM for the index scan.
-        logger.info(
-            "Loading all articles for popularity ranking "
-            "(this reads the full dump once; ~1–2 GB RAM)..."
-        )
-        raw_articles = list(
-            tqdm(stream_articles(dump_path), desc="Loading", unit="articles")
-        )
-        logger.info("Loaded %d raw articles.", len(raw_articles))
+        # ── Full run: two-pass streaming — peak RAM stays under ~2 GB ─────────
 
+        # Step 1: Download dump
+        if os.path.exists(dump_path):
+            logger.info("Dump already present at %s — skipping download.", dump_path)
+        else:
+            logger.info("Step 1/5  Downloading Cirrus dump...")
+            download_dump(dump_url, dump_path)
+
+        # Step 2: Pass 1 — collect (score, title) pairs only.
+        # ~1 GB for 6.7M articles, versus ~15 GB when loading full article dicts.
         logger.info(
-            "Step 3/5  Filtering: top %.0f%% by pageview rank, min %d tokens...",
+            "Step 2/5  Pass 1/2: scanning dump for popularity scores "
+            "(title + score only)..."
+        )
+        score_pairs: list[tuple[float, str]] = []
+        for article in tqdm(
+            stream_articles(dump_path), desc="Pass 1 scoring", unit="articles"
+        ):
+            title = article.get("title") or ""
+            score = article.get("popularity_score") or 0.0
+            if title:
+                score_pairs.append((score, title))
+        logger.info("Pass 1 complete: %d articles scanned.", len(score_pairs))
+
+        # Step 3: Compute threshold and build title→rank mapping.
+        logger.info(
+            "Step 3/5  Computing popularity threshold (top %.0f%%)...",
             top_fraction * 100,
-            min_tokens,
         )
-        article_rank_pairs = list(
-            filter_articles(raw_articles, top_fraction, min_tokens)
+        _, rank_map = compute_popularity_threshold_from_scores(score_pairs, top_fraction)
+        del score_pairs  # release ~1 GB before Pass 2
+
+        # Step 4: Connect to Qdrant
+        logger.info("Step 4/5  Connecting to Qdrant and ensuring collection exists...")
+        client = QdrantClient(host=qdrant_host, port=qdrant_port)
+        get_or_create_collection(client, collection_name)
+
+        # Step 5: Pass 2 — stream dump again; one article in memory at a time.
+        logger.info(
+            "Step 5/5  Pass 2/2: processing, embedding, and upserting filtered articles..."
         )
-        logger.info("Kept %d articles after filtering.", len(article_rank_pairs))
+        articles_dropped_pop = 0
+        articles_dropped_stub = 0
 
-    # ── Step 3 (limit mode) / Step 4: Connect to Qdrant, create collection ───
-    logger.info("Step 4/5  Connecting to Qdrant and ensuring collection exists...")
-    client = QdrantClient(host=qdrant_host, port=qdrant_port)
-    get_or_create_collection(client, collection_name)
+        for article in tqdm(
+            stream_articles(dump_path), desc="Pass 2 processing", unit="articles"
+        ):
+            title = article.get("title") or ""
+            if title not in rank_map:
+                articles_dropped_pop += 1
+                continue
 
-    # ── Step 4/5: Process articles → embed → upsert ───────────────────────────
-    logger.info("Step 5/5  Processing, embedding, and upserting chunks...")
+            full_text = (
+                (article.get("opening_text") or "")
+                + " "
+                + (article.get("text") or "")
+            )
+            if count_tokens(full_text) < min_tokens:
+                articles_dropped_stub += 1
+                continue
 
-    total_chunks = 0
-    total_upserted = 0
+            rank = rank_map[title]
+            chunks = process_article(article, pageview_rank=rank)
+            if not chunks:
+                continue
 
-    for article, rank in tqdm(article_rank_pairs, desc="Articles", unit="article"):
-        chunks = process_article(article, pageview_rank=rank)
-        if not chunks:
-            continue
+            total_chunks += len(chunks)
+            upserted = upsert_chunks(
+                chunks=chunks,
+                client=client,
+                collection_name=collection_name,
+                embedder_url=embedder_url,
+                model=embed_model,
+                batch_size=batch_size,
+            )
+            total_upserted += upserted
+            articles_processed += 1
 
-        total_chunks += len(chunks)
-        upserted = upsert_chunks(
-            chunks=chunks,
-            client=client,
-            collection_name=collection_name,
-            embedder_url=embedder_url,
-            model=embed_model,
-            batch_size=batch_size,
+        logger.info(
+            "Pass 2 results: %d processed, %d dropped (popularity), %d dropped (stub)",
+            articles_processed,
+            articles_dropped_pop,
+            articles_dropped_stub,
         )
-        total_upserted += upserted
 
     # ── Verification ──────────────────────────────────────────────────────────
     collection_info = client.get_collection(collection_name)
     point_count = collection_info.points_count
 
     logger.info("=== Ingestion Complete ===")
-    logger.info("Articles processed:  %d", len(article_rank_pairs))
+    logger.info("Articles processed:  %d", articles_processed)
     logger.info("Chunks generated:    %d", total_chunks)
     logger.info("Points upserted:     %d", total_upserted)
     logger.info("Qdrant point count:  %d", point_count)

@@ -295,6 +295,38 @@ def process_article(article: dict, pageview_rank: int) -> list[dict]:
 
 # ── Popularity filtering ──────────────────────────────────────────────────────
 
+def compute_popularity_threshold_from_scores(
+    score_pairs: list[tuple[float, str]],
+    top_fraction: float,
+) -> tuple[float, dict[str, int]]:
+    """
+    Same semantics as compute_popularity_threshold but takes pre-collected
+    (popularity_score, title) pairs instead of full article dicts.
+
+    Used by the two-pass streaming ingestion path so that only lightweight
+    score data needs to be held in memory during the ranking step (~1 GB
+    for 6.7M articles vs ~15 GB for full article content).
+    """
+    scored = [(s, t) for s, t in score_pairs if s > 0]
+    scored.sort(key=lambda x: x[0], reverse=True)
+
+    keep_n = max(1, int(len(scored) * top_fraction))
+    threshold = scored[keep_n - 1][0] if scored else 0.0
+
+    rank_map: dict[str, int] = {
+        title: rank + 1
+        for rank, (_, title) in enumerate(scored[:keep_n])
+    }
+
+    logger.info(
+        "Popularity threshold: %.6f (keeping top %d / %d articles)",
+        threshold,
+        keep_n,
+        len(scored),
+    )
+    return threshold, rank_map
+
+
 def compute_popularity_threshold(
     articles: list[dict],
     top_fraction: float,
